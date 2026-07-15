@@ -3,6 +3,12 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 
+const SHARED_CACHE_NAME = "glb-viewer-shared-files";
+
+const BASE_URL = new URL("./", window.location.href);
+const INDEX_URL = new URL("./index.html", BASE_URL);
+const SHARED_FILE_URL = new URL("./shared.glb", BASE_URL);
+
 // シーン生成
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x202020);
@@ -16,7 +22,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.shadowMap.enabled = true;
@@ -76,7 +82,7 @@ camera.position.set(0, 1, 3);
 
 // GLBローダー設定
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/draco/");
+dracoLoader.setDecoderPath("https://unpkg.com/three@0.185.1/examples/jsm/libs/draco/");
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
@@ -90,13 +96,23 @@ const loadGLB = (url) => {
       scene.add(hemisphereLight, ambientLight, makeArrows(0.5));
       scene.add(gltf.scene);
       fitCameraToObject(camera, gltf.scene, controls);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      if (url.startsWith("blob:")) {
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
     },
     (p) => {
-      console.log(`[INFO] Loading ${(p.loaded / p.total * 100).toFixed(1)}%`)
+      if (p.total > 0) {
+        const progress = (p.loaded / p.total * 100);
+        console.log(`[INFO] Loading ${progress.toFixed(1)}%`);
+      } else {
+        console.log(`[INFO] Loading ${p.loaded} bytes`);
+      }
     },
     (err) => {
       console.error("[Error] ", err);
+      if (url.startsWith("blob:")) {
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
       alert("[Error]\nFailed to load model. Please check the file format and contents.");
     }
   );
@@ -108,18 +124,22 @@ document.getElementById("fileInput").addEventListener("change", (e) => {
   if (!file) return;
   const url = URL.createObjectURL(file);
   loadGLB(url);
+  e.target.value = "";
 });
 
 // カメラ自動調整関数
 const fitCameraToObject = (camera, object, controls) => {
-  const box = new THREE.Box3().setFromObject(object);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
+  let box = new THREE.Box3().setFromObject(object);
+  let size = box.getSize(new THREE.Vector3());
+  let center = box.getCenter(new THREE.Vector3());
 
   if (size.length() < 0.0001) {
     console.warn("[WARN] Model too small, scaling up.");
     alert("[WARN]\nModel is too small, scaling up.");
     object.scale.set(100, 100, 100);
+    box = new THREE.Box3().setFromObject(object);
+    size = box.getSize(new THREE.Vector3());
+    center = box.getCenter(new THREE.Vector3());
   }
 
   camera.position.copy(center).add(new THREE.Vector3(0, size.y * 2, size.z * 3));
@@ -143,56 +163,78 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+let shouldShowUpdateAlert = false;
+
 // バージョン表示関数
 const showVersion = (version) => {
-  const div = document.createElement("div");
+  let div = document.getElementById("version-display");
+  if (!div) {
+    div = document.createElement("div");
+    div.id = "version-display";
+    div.style.position = "fixed";
+    div.style.bottom = "10px";
+    div.style.right = "10px";
+    div.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
+    div.style.color = "#fff";
+    div.style.padding = "6px 12px";
+    div.style.borderRadius = "8px";
+    div.style.fontFamily = "Arial, sans-serif";
+    div.style.fontSize = "14px";
+    div.style.zIndex = "10000";
+    document.body.appendChild(div);
+  }
   div.textContent = `GLB Viewer: v${version}`;
-  div.style.position = "fixed";
-  div.style.bottom = "10px";
-  div.style.right = "10px";
-  div.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
-  div.style.color = "#fff";
-  div.style.padding = "6px 12px";
-  div.style.borderRadius = "8px";
-  div.style.fontFamily = "Arial, sans-serif";
-  div.style.fontSize = "14px";
-  div.style.zIndex = "10000";
-  document.body.appendChild(div);
-}
+};
+
+const requestServiceWorkerVersion = (registration) => {
+  const worker = 
+    registration.active ||
+    navigator.serviceWorker.controller ||
+    registration.waiting ||
+    registration.installing;
+
+  if (worker) {
+    worker.postMessage({ type: "GET_VERSION" });
+  } else {
+    console.warn("[WARN] Active ServiceWorker was not found.");
+  }
+};
 
 // サービスワーカー登録
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("service-worker.js").then(
-    (registration) => {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "VERSION") {
+      const currentVersion = event.data.version;
+      showVersion(currentVersion);
+
+      if (shouldShowUpdateAlert) {
+        shouldShowUpdateAlert = false;
+        alert(`【GLB_Viewer v${currentVersion}】\nWebアプリが更新されました。アプリを再起動してください。\nこの表示が何度も出る場合は更新が正しく適用されていない可能性があります。Webアプリを一度削除し、キャッシュの削除を実行の上で再度インストールしてください。`);
+      }
+    }
+  });
+
+  navigator.serviceWorker.register("./service-worker.js").then(
+    async (registration) => {
       console.log("[INFO] ServiceWorker registration successful with scope: ", registration.scope);
 
       registration.addEventListener("updatefound", () => {
         const installWorker = registration.installing;
         if (installWorker != null) {
+          const hadController = navigator.serviceWorker.controller !== null;
           installWorker.onstatechange = (e) => {
             if (e.target.state === "activated") {
-              navigator.serviceWorker.controller.postMessage({ type: "GET_VERSION" });
-              navigator.serviceWorker.addEventListener("message", (event) => {
-                if (event.data && event.data.type === "VERSION") {
-                  const newVersion = event.data.version;
-                  showVersion(newVersion);
-                  alert(`【GLB_Viewer v${newVersion}】\nWebアプリが更新されました。アプリを再起動してください。\n一部の環境では更新が正しく適用されない場合があります。Webアプリを一度削除し、キャッシュの削除を実行の上で再度インストールしてください。`);
-                }
-              });
-            } 
+              if (hadController) {
+                shouldShowUpdateAlert = true;
+              }
+              e.target.postMessage({ type: "GET_VERSION" });
+            }
           };
         }
       });
 
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: "GET_VERSION" });
-        navigator.serviceWorker.addEventListener("message", (event) => {
-          if (event.data && event.data.type === "VERSION") {
-            const currentVersion = event.data.version;
-            showVersion(currentVersion);
-          }
-        });
-      }
+      const readyRegistration = await navigator.serviceWorker.ready;
+      requestServiceWorkerVersion(readyRegistration);
     },
     (err) => {
       console.error("[ERROR] ServiceWorker registration failed: ", err);
@@ -202,14 +244,65 @@ if ("serviceWorker" in navigator) {
   console.log("[WARN] ServiceWorkers are not supported.");
 }
 
+const showShareError = (errorType) => {
+  if (errorType === "invalid-file") {
+    alert("[ERROR]\n共有されたファイルはGLBファイルではありません。");
+  } else if (errorType === "failed") {
+    alert("[ERROR]\n共有ファイルの処理に失敗しました。");
+  } else {
+    alert("[ERROR]\n不明なエラーが発生しました。");
+  }
+};
+
+const clearShareQuery = () => {
+  window.history.replaceState(
+    {},
+    document.title,
+    INDEX_URL.href
+  );
+};
+
 // 共有ファイル読み込み
 window.addEventListener("load", async () => {
-  const cache = await caches.open("shared-files");
-  const response = await cache.match("/shared.glb");
-  if (response) {
+  const params = new URLSearchParams(window.location.search);
+  
+  const shareError = params.get("share-error");
+  if (shareError) {
+    showShareError(shareError);
+    clearShareQuery();
+    return;
+  }
+
+  if (params.get("share-target") !== "1") {
+    return;
+  }
+
+  if (!("caches" in window)) {
+    console.error("[ERROR] Cache Storage API is not supported.");
+    alert("[ERROR]\nこのブラウザはキャッシュストレージAPIをサポートしていません。");
+    clearShareQuery();
+    return;
+  }
+
+  try {
+    const cache = await caches.open(SHARED_CACHE_NAME);
+    const response = await cache.match(SHARED_FILE_URL.href);
+    if (!response) {
+      console.error("[ERROR] Shared GLB file was not found in cache.");
+      alert("[ERROR]\n共有ファイルがキャッシュに見つかりませんでした。");
+      return;
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     loadGLB(url);
-    await cache.delete("/shared.glb");
+    await cache.delete(SHARED_FILE_URL.href);
+
+    console.log("[INFO] Shared GLB file loaded.");
+
+  } catch (error) {
+    console.error("[ERROR] Failed to load shared GLB file: ", error);
+    alert("[ERROR]\n共有ファイルの読み込みに失敗しました。");
+  } finally {
+    clearShareQuery();
   }
 });

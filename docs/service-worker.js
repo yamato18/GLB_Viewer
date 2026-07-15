@@ -1,28 +1,68 @@
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 
 const CACHE_NAME = `glb-viewer-${VERSION}`;
+const SHARED_CACHE_NAME = "glb-viewer-shared-files";
+
+const BASE_URL = new URL("./", self.location.href);
+const INDEX_URL = new URL("./index.html", BASE_URL);
+const SHARED_TARGET_URL = new URL("./share-target", BASE_URL);
+const SHARED_FILE_URL = new URL("./shared.glb", BASE_URL);
 
 const ASSETS = [
-  "./",
-  "./index.html",
-  "./style.css",
-  "./app.js",
-  "./manifest.json",
-  "https://unpkg.com/three@0.180.0/build/three.module.js",
-  "https://unpkg.com/three@0.180.0/examples/jsm/controls/OrbitControls.js",
-  "https://unpkg.com/three@0.180.0/examples/jsm/loaders/GLTFLoader.js"
+  BASE_URL.href,
+  INDEX_URL.href,
+  new URL("./style.css", BASE_URL).href,
+  new URL("./app.js", BASE_URL).href,
+  new URL("./manifest.json", BASE_URL).href,
+
+  "https://unpkg.com/three@0.185.1/build/three.module.js",
+  "https://unpkg.com/three@0.185.1/examples/jsm/controls/OrbitControls.js",
+  "https://unpkg.com/three@0.185.1/examples/jsm/loaders/GLTFLoader.js",
+  "https://unpkg.com/three@0.185.1/examples/jsm/loaders/DRACOLoader.js"
 ];
 
 // 共有ファイル処理関数
 const handleShare = async (request) => {
-  const data = await request.formData();
-  const file = data.get("file");
-  if (file && file.name.endsWith(".glb")) {
-    const fileData = await file.arrayBuffer();
-    const cache = await caches.open("shared-files");
-    await cache.put("/shared.glb", new Response(fileData));
+  try {
+    const data = await request.formData();
+    const file = data.get("file");
+
+    if (file && file.name && file.name.toLowerCase().endsWith(".glb")) {
+      const fileData = await file.arrayBuffer();
+      const cache = await caches.open(SHARED_CACHE_NAME);
+
+      await cache.put(
+        SHARED_FILE_URL.href,
+        new Response(fileData, {
+          headers: {
+            "Content-Type": file.type || "model/gltf-binary"
+          }
+        })
+      );
+
+      console.log(`[INFO] Shared file cached: ${file.name}`);
+
+      return Response.redirect(
+        `${INDEX_URL.href}?share-target=1`,
+        303
+      );
+    }
+
+    console.log("[ERROR] Shared file is not a GLB file.");
+
+    return Response.redirect(
+      `${INDEX_URL.href}?share-error=invalid-file`,
+      303
+    );
+
+  } catch (error) {
+    console.error("[ERROR] Failed to process shared file:", error);
   }
-  return Response.redirect("./index.html");
+
+  return Response.redirect(
+    `${INDEX_URL.href}?share-error=failed`,
+    303
+  );
 };
 
 // インストールイベント
@@ -36,7 +76,7 @@ self.addEventListener("install", (event) => {
       } catch (error) {
         console.error("[WARN] Some assets failed to cache: ", error);
       }
-      self.skipWaiting();
+      await self.skipWaiting();
     })());
 });
 
@@ -45,7 +85,7 @@ self.addEventListener("fetch", (event) => {
 
   // 共有ファイルのPOSTリクエスト処理
   const url = new URL(event.request.url);
-  if (url.pathname === "/index.html" && event.request.method === "POST") {
+  if (url.origin === SHARED_TARGET_URL.origin && url.pathname === SHARED_TARGET_URL.pathname && event.request.method === "POST") {
     event.respondWith(handleShare(event.request));
     return;
   }
@@ -82,8 +122,8 @@ self.addEventListener("activate", (event) => {
       const names = await caches.keys();
       await Promise.all(
         names.map((name) => {
-          if (name !== CACHE_NAME && name !== "shared-files") {
-            return  caches.delete(name);
+          if (name !== CACHE_NAME && name !== SHARED_CACHE_NAME) {
+            return caches.delete(name);
           }
         }),
       );

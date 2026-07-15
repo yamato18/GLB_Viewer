@@ -1,7 +1,9 @@
 {
   "name": "GLB Viewer",
   "short_name": "GLB Viewer",
+  "id": "./",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#202020",
   "theme_color": "#202020",
@@ -19,14 +21,18 @@
     }
   ],
   "share_target": {
-    "action": "./index.html",
+    "action": "./share-target",
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {
       "files": [
         {
           "name": "file",
-          "accept": [".glb"]
+          "accept": [
+            ".glb",
+            "model/gltf-binary",
+            "application/octet-stream"
+          ]
         }
       ]
     }
