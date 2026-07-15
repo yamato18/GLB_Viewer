@@ -113,7 +113,7 @@ const loadGLB = (url) => {
       if (url.startsWith("blob:")) {
         setTimeout(() => URL.revokeObjectURL(url), 2000);
       }
-      alert("[Error]\nFailed to load model. Please check the file format and contents.");
+      alert("[Error]\nモデルの読み込みに失敗しました。ファイル形式を確認してください。");
     }
   );
 };
@@ -135,7 +135,7 @@ const fitCameraToObject = (camera, object, controls) => {
 
   if (size.length() < 0.0001) {
     console.warn("[WARN] Model too small, scaling up.");
-    alert("[WARN]\nModel is too small, scaling up.");
+    alert("[WARN]\nモデルが小さすぎます。スケーリングアップします。");
     object.scale.set(100, 100, 100);
     box = new THREE.Box3().setFromObject(object);
     size = box.getSize(new THREE.Vector3());
@@ -242,6 +242,36 @@ if ("serviceWorker" in navigator) {
   );
 } else {
   console.log("[WARN] ServiceWorkers are not supported.");
+}
+
+// macOS
+if ("launchQueue" in window && "LaunchParams" in window && "files" in LaunchParams.prototype) {
+  launchQueue.setConsumer(async (launchParams) => {
+    if (!launchParams.files || launchParams.files.length === 0) {
+      return;
+    }
+
+    try {
+      const fileHandle = launchParams.files[0];
+      const file = await fileHandle.getFile();
+
+      if (!file.name.toLowerCase().endsWith(".glb")) {
+        alert("[ERROR]\n選択されたファイルはGLBファイルではありません。");
+        return;
+      }
+
+      const url = URL.createObjectURL(file);
+      loadGLB(url);
+
+      console.log(`[INFO] File opened by File Handling API: ${file.name}`);
+
+    } catch (error) {
+      console.error("[ERROR] Failed to open file using File Handling API: ", error);
+      alert("[ERROR]\nGLBファイルを開けませんでした。");
+    }
+  });
+} else {
+  console.log("[WARN] File Handling API is not supported.");
 }
 
 const showShareError = (errorType) => {

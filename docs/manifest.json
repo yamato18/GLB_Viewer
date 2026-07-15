@@ -36,5 +36,15 @@
         }
       ]
     }
-  }
+  },
+  "file_handlers": [
+    {
+      "action": "./index.html?file-handler=1",
+      "accept": {
+        "model/gltf-binary": [".glb"],
+        "application/octet-stream": [".glb"]
+      },
+      "launch_type": "single-client"
+    }
+  ]
 }

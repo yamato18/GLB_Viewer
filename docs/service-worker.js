@@ -1,4 +1,4 @@
-const VERSION = "0.8.0";
+const VERSION = "0.8.1";
 
 const CACHE_NAME = `glb-viewer-${VERSION}`;
 const SHARED_CACHE_NAME = "glb-viewer-shared-files";
